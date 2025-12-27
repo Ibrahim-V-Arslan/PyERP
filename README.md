@@ -20,8 +20,8 @@ The application features a dark-themed interface for controls and a light-themed
     ```
 ---
 
-You can also compile this using Pyinstaller (Win) or Py2App (Mac-silicon) so you can have a standalone app.
-You can reach out to me for the specific setup files if you have any trouble.
+*You can also compile this using Pyinstaller (Win) or Py2App (Mac-silicon) so you can have a standalone app.*
+*You can reach out to me for the specific setup files if you have any trouble.*
 ## Features
 
 * **ERPLAB/EEGLAB to MNE Conversion**: Easily convert `.erp/.set` files (MATLAB-based) into the MNE-Python native `.fif` format, making your data accessible for further analysis within the MNE ecosystem.

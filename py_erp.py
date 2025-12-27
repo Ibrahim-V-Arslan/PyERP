@@ -1,3 +1,8 @@
+import sys
+if sys.platform == 'darwin':
+    from tkmacosx import Button as TkButton
+else:
+    from tkinter import Button as TkButton
 import tkinter as tk
 from tkinter import filedialog, messagebox, simpledialog
 import scipy.io
@@ -6,6 +11,7 @@ import mne
 import os
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+from PIL import Image, ImageTk  # Make sure this is imported!
 
 # --- Dark Mode Color Palette (for GUI elements, not the plot) ---
 DARK_BG = "#2E2E2E"
@@ -35,10 +41,9 @@ def resource_path(relative_path):
 
     return os.path.join(base_path, relative_path)
 try:
-    icon_path = resource_path("py_erp.ico")
+    icon_path = resource_path("brain.icns")
 except:
     icon_path = None
-
 
 # --- Core MNE Processing Functions ---
 def erp_to_fif(input_file, output_file):
@@ -81,15 +86,57 @@ def erp_to_fif(input_file, output_file):
         if 'erp_data' in locals() and 'ERP' in erp_data:
             error_message += f"ERP structure keys: {erp_data['ERP'].dtype.names if hasattr(erp_data['ERP'], 'dtype') else 'N/A'}\n"
         return False, error_message
+# --- set_to_fif Processing Functions ---
+def set_to_fif(input_file, output_file):
+    """
+    Convert an EEGLAB .set file (epoched) to a single MNE-compatible .fif file.
+    """
+    try:
+        # MNE handles the paired .fdt file automatically if it's in the same folder
+        epochs = mne.io.read_epochs_eeglab(input_file, verbose=False)
+        
+        evokeds_list = []
+        # If the file has defined event IDs (conditions/bins), average each separately
+        if epochs.event_id:
+            for label in epochs.event_id:
+                # Create an evoked object (ERP) for this condition
+                evoked = epochs[label].average()
+                evoked.comment = str(label) # Use the event label as the bin name
+                evokeds_list.append(evoked)
+        else:
+            # If no specific conditions are found, average all epochs
+            evoked = epochs.average()
+            evoked.comment = "Average"
+            evokeds_list.append(evoked)
+
+        mne.write_evokeds(output_file, evokeds_list, overwrite=True)
+        return True, f"Successfully converted '{os.path.basename(input_file)}' to '{os.path.basename(output_file)}'"
+        
+    except Exception as e:
+        error_message = f"An error occurred during SET to FIF conversion: {e}\n"
+        error_message += "Ensure the file contains epoched data (not continuous raw data)."
+        return False, error_message
 
 # --- Tkinter Application Class ---
 class ErpProcessorApp:
     def __init__(self, root_window):
         self.root = root_window
         self.root.title("PYERP")
+        self.root.configure(bg=DARK_BG)
+        # --- FIX FOR DOCK ICON ---
         if icon_path and os.path.exists(icon_path):
-            self.root.iconbitmap(icon_path)
-        self.root.configure(bg=DARK_BG) 
+            try:
+                # Open the icon image using Pillow (supports ICNS, PNG, ICO)
+                app_icon = Image.open(icon_path)
+                
+                # Create a Tkinter-compatible photo image
+                photo = ImageTk.PhotoImage(app_icon)
+                
+                # 'True' applies this icon to all future toplevel windows and the Dock
+                self.root.iconphoto(True, photo) 
+                
+            except Exception as e:
+                print(f"Warning: Could not load icon: {e}")
         self.root.protocol("WM_DELETE_WINDOW", self._on_closing)
 
 
@@ -105,7 +152,7 @@ class ErpProcessorApp:
         self.last_plot_labels = []
 
         # --- GUI Frames ---
-        convert_frame = tk.LabelFrame(self.root, text="ERP to FIF Conversion", padx=10, pady=10, bg=DARK_FRAME_BG, fg=DARK_FRAME_FG, relief=tk.GROOVE)
+        convert_frame = tk.LabelFrame(self.root, text="ERP/set to FIF Conversion", padx=10, pady=10, bg=DARK_FRAME_BG, fg=DARK_FRAME_FG, relief=tk.GROOVE)
         convert_frame.pack(fill=tk.X, padx=10, pady=5)
 
         plot_controls_frame = tk.LabelFrame(self.root, text="Plotting Controls", padx=10, pady=10, bg=DARK_FRAME_BG, fg=DARK_FRAME_FG, relief=tk.GROOVE)
@@ -115,24 +162,25 @@ class ErpProcessorApp:
         self.plot_display_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
 
         # --- Conversion Section Widgets ---
-        tk.Label(convert_frame, text="Input .erp file:", bg=DARK_BG, fg=DARK_FG).grid(row=0, column=0, sticky=tk.W, pady=2)
+
+        tk.Label(convert_frame, text="Input file (.erp, .set):", bg=DARK_BG, fg=DARK_FG).grid(row=0, column=0, sticky=tk.W, pady=2)
         self.input_erp_entry = tk.Entry(convert_frame, width=60, bg=DARK_ENTRY_BG, fg=DARK_ENTRY_FG, insertbackground=DARK_INSERT_BG, relief=tk.FLAT)
         self.input_erp_entry.grid(row=0, column=1, sticky=tk.EW, pady=2)
-        tk.Button(convert_frame, text="Browse ERP", command=self._browse_input_erp, bg=DARK_BUTTON_BG, fg=DARK_BUTTON_FG, activebackground=DARK_ACTIVE_BUTTON_BG, activeforeground=DARK_FG, relief=tk.FLAT, padx=5).grid(row=0, column=2, padx=5, pady=2)
+        TkButton(convert_frame, text="Browse ERP", command=self._browse_input_erp, bg=DARK_BUTTON_BG, fg=DARK_BUTTON_FG, activebackground=DARK_ACTIVE_BUTTON_BG, activeforeground=DARK_FG, relief=tk.FLAT, padx=5).grid(row=0, column=2, padx=5, pady=2)
 
         tk.Label(convert_frame, text="Output .fif file:", bg=DARK_BG, fg=DARK_FG).grid(row=1, column=0, sticky=tk.W, pady=2)
         self.output_fif_entry = tk.Entry(convert_frame, width=60, bg=DARK_ENTRY_BG, fg=DARK_ENTRY_FG, insertbackground=DARK_INSERT_BG, relief=tk.FLAT)
         self.output_fif_entry.grid(row=1, column=1, sticky=tk.EW, pady=2)
-        tk.Button(convert_frame, text="Browse FIF Output", command=self._browse_output_fif, bg=DARK_BUTTON_BG, fg=DARK_BUTTON_FG, activebackground=DARK_ACTIVE_BUTTON_BG, activeforeground=DARK_FG, relief=tk.FLAT, padx=5).grid(row=1, column=2, padx=5, pady=2)
+        TkButton(convert_frame, text="Browse FIF Output", command=self._browse_output_fif, bg=DARK_BUTTON_BG, fg=DARK_BUTTON_FG, activebackground=DARK_ACTIVE_BUTTON_BG, activeforeground=DARK_FG, relief=tk.FLAT, padx=5).grid(row=1, column=2, padx=5, pady=2)
         
-        tk.Button(convert_frame, text="Convert ERP to FIF", command=self._run_conversion, bg=DARK_BUTTON_BG, fg=DARK_BUTTON_FG, activebackground=DARK_ACTIVE_BUTTON_BG, activeforeground=DARK_FG, relief=tk.FLAT, padx=5).grid(row=2, column=1, pady=10)
+        TkButton(convert_frame, text="Convert ERP/set to FIF", command=self._run_conversion, bg=DARK_BUTTON_BG, fg=DARK_BUTTON_FG, activebackground=DARK_ACTIVE_BUTTON_BG, activeforeground=DARK_FG, relief=tk.FLAT, padx=5).grid(row=2, column=1, pady=10)
         convert_frame.columnconfigure(1, weight=1)
 
         # --- Plotting Controls Section Widgets ---
         tk.Label(plot_controls_frame, text="Load .fif file:", bg=DARK_BG, fg=DARK_FG).grid(row=0, column=0, sticky=tk.W, pady=2)
         self.load_fif_entry = tk.Entry(plot_controls_frame, textvariable=self.current_fif_file, width=50, state='readonly', readonlybackground=READONLY_ENTRY_BG, fg=DARK_ENTRY_FG, relief=tk.FLAT)
         self.load_fif_entry.grid(row=0, column=1, columnspan=3, sticky=tk.EW, pady=2)
-        tk.Button(plot_controls_frame, text="Browse and Load FIF", command=self._browse_and_load_fif, bg=DARK_BUTTON_BG, fg=DARK_BUTTON_FG, activebackground=DARK_ACTIVE_BUTTON_BG, activeforeground=DARK_FG, relief=tk.FLAT, padx=5).grid(row=0, column=4, padx=5, pady=2)
+        TkButton(plot_controls_frame, text="Browse and Load FIF", command=self._browse_and_load_fif, bg=DARK_BUTTON_BG, fg=DARK_BUTTON_FG, activebackground=DARK_ACTIVE_BUTTON_BG, activeforeground=DARK_FG, relief=tk.FLAT, padx=5).grid(row=0, column=4, padx=5, pady=2)
 
         tk.Label(plot_controls_frame, text="Channel(s):", bg=DARK_BG, fg=DARK_FG).grid(row=1, column=0, sticky=tk.W, pady=2)
         
@@ -141,7 +189,7 @@ class ErpProcessorApp:
         self.channels_entry = tk.Entry(channel_selection_frame, bg=DARK_ENTRY_BG, fg=DARK_ENTRY_FG, insertbackground=DARK_INSERT_BG, relief=tk.FLAT)
         self.channels_entry.insert(0, "Pz")
         self.channels_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
-        tk.Button(channel_selection_frame, text="Browse", command=self._browse_channels, bg=DARK_BUTTON_BG, fg=DARK_BUTTON_FG, activebackground=DARK_ACTIVE_BUTTON_BG, activeforeground=DARK_FG, relief=tk.FLAT, padx=5).pack(side=tk.LEFT, padx=(5,0))
+        TkButton(channel_selection_frame, text="Browse", command=self._browse_channels, bg=DARK_BUTTON_BG, fg=DARK_BUTTON_FG, activebackground=DARK_ACTIVE_BUTTON_BG, activeforeground=DARK_FG, relief=tk.FLAT, padx=5).pack(side=tk.LEFT, padx=(5,0))
 
         tk.Label(plot_controls_frame, text="Bin(s):", bg=DARK_BG, fg=DARK_FG).grid(row=1, column=2, sticky=tk.W, padx=(10,0), pady=2)
 
@@ -150,7 +198,7 @@ class ErpProcessorApp:
         self.bins_entry = tk.Entry(bin_selection_frame, bg=DARK_ENTRY_BG, fg=DARK_ENTRY_FG, insertbackground=DARK_INSERT_BG, relief=tk.FLAT)
         self.bins_entry.insert(0, "1")
         self.bins_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
-        tk.Button(bin_selection_frame, text="Browse", command=self._browse_bins, bg=DARK_BUTTON_BG, fg=DARK_BUTTON_FG, activebackground=DARK_ACTIVE_BUTTON_BG, activeforeground=DARK_FG, relief=tk.FLAT, padx=5).pack(side=tk.LEFT, padx=(5,0))
+        TkButton(bin_selection_frame, text="Browse", command=self._browse_bins, bg=DARK_BUTTON_BG, fg=DARK_BUTTON_FG, activebackground=DARK_ACTIVE_BUTTON_BG, activeforeground=DARK_FG, relief=tk.FLAT, padx=5).pack(side=tk.LEFT, padx=(5,0))
         
         tk.Checkbutton(plot_controls_frame, text="Average Channels", variable=self.avg_channels_var, bg=DARK_BG, fg=DARK_FG, selectcolor=DARK_SELECT_COLOR, activebackground=DARK_BG, activeforeground=DARK_FG, highlightthickness=0).grid(row=2, column=1, sticky=tk.W, pady=2)
         tk.Checkbutton(plot_controls_frame, text="Average Bins", variable=self.avg_bins_var, bg=DARK_BG, fg=DARK_FG, selectcolor=DARK_SELECT_COLOR, activebackground=DARK_BG, activeforeground=DARK_FG, highlightthickness=0).grid(row=2, column=2, columnspan=2, sticky=tk.W, padx=(10,0), pady=2)
@@ -184,23 +232,23 @@ class ErpProcessorApp:
         self.plot_title_entry.grid(row=6, column=1, columnspan=3, sticky=tk.EW, pady=2)
 
         # --- Button Row ---
-        tk.Button(plot_controls_frame, text="Update Plot", command=self._update_plot_display, bg=DARK_BUTTON_BG, fg=DARK_BUTTON_FG, activebackground=DARK_ACTIVE_BUTTON_BG, activeforeground=DARK_FG, relief=tk.FLAT, padx=5).grid(row=7, column=1, pady=10, sticky=tk.W)
+        TkButton(plot_controls_frame, text="Update Plot", command=self._update_plot_display, bg=DARK_BUTTON_BG, fg=DARK_BUTTON_FG, activebackground=DARK_ACTIVE_BUTTON_BG, activeforeground=DARK_FG, relief=tk.FLAT, padx=5).grid(row=7, column=1, pady=10, sticky=tk.W)
         
         action_button_frame = tk.Frame(plot_controls_frame, bg=DARK_BG)
         action_button_frame.grid(row=7, column=2, columnspan=2, sticky=tk.W, pady=10)
-        tk.Button(action_button_frame, text="Save Plot", command=self._export_plot, bg=DARK_BUTTON_BG, fg=DARK_BUTTON_FG, activebackground=DARK_ACTIVE_BUTTON_BG, activeforeground=DARK_FG, relief=tk.FLAT, padx=5).pack(side=tk.LEFT, padx=(5,0))
-        tk.Button(action_button_frame, text="Edit Legends", command=self._edit_legends, bg=DARK_BUTTON_BG, fg=DARK_BUTTON_FG, activebackground=DARK_ACTIVE_BUTTON_BG, activeforeground=DARK_FG, relief=tk.FLAT, padx=5).pack(side=tk.LEFT, padx=(5,0))
+        TkButton(action_button_frame, text="Save Plot", command=self._export_plot, bg=DARK_BUTTON_BG, fg=DARK_BUTTON_FG, activebackground=DARK_ACTIVE_BUTTON_BG, activeforeground=DARK_FG, relief=tk.FLAT, padx=5).pack(side=tk.LEFT, padx=(5,0))
+        TkButton(action_button_frame, text="Edit Legends", command=self._edit_legends, bg=DARK_BUTTON_BG, fg=DARK_BUTTON_FG, activebackground=DARK_ACTIVE_BUTTON_BG, activeforeground=DARK_FG, relief=tk.FLAT, padx=5).pack(side=tk.LEFT, padx=(5,0))
         
-        tk.Label(plot_controls_frame, text="Export DPI:", bg=DARK_BG, fg=DARK_FG).grid(row=7, column="3", sticky=tk.E, padx=(10,0), pady=2)
+        tk.Label(plot_controls_frame, text="Export DPI:", bg=DARK_BG, fg=DARK_FG).grid(row=7, column="4", sticky=tk.E, padx=(10,0), pady=2)
         self.dpi_entry = tk.Entry(plot_controls_frame, width=5, bg=DARK_ENTRY_BG, fg=DARK_ENTRY_FG, insertbackground=DARK_INSERT_BG, relief=tk.FLAT)
         self.dpi_entry.insert(0, "500")
-        self.dpi_entry.grid(row=7, column="4", sticky=tk.W, padx=(0,5), pady=2)
+        self.dpi_entry.grid(row=7, column="5", sticky=tk.W, padx=(0,5), pady=2)
 
         plot_controls_frame.columnconfigure(1, weight=1)
         plot_controls_frame.columnconfigure(3, weight=1)
 
         # --- Plot Display Section ---
-        self.fig, self.ax = plt.subplots(figsize=(10, 6)) 
+        self.fig, self.ax = plt.subplots(figsize=(10, 6), dpi=62.5) 
         self.canvas = FigureCanvasTkAgg(self.fig, master=self.plot_display_frame)
         self.canvas_widget = self.canvas.get_tk_widget()
         self.canvas_widget.pack(fill=tk.BOTH, expand=True)
@@ -211,7 +259,7 @@ class ErpProcessorApp:
         self.ax.clear()
         self.ax.set_xlabel('Time (ms)')
         self.ax.set_ylabel('Amplitude (µV)')
-        self.ax.set_title('Load data and configure plot options')
+        self.ax.set_title('Load data to display ERPs')
         self.ax.grid(self.gridlines_var.get(), linestyle='--', linewidth=0.5)
         self.last_plot_handles.clear()
         self.last_plot_labels.clear()
@@ -225,12 +273,14 @@ class ErpProcessorApp:
 
     def _browse_input_erp(self):
         filename = filedialog.askopenfilename(
-            title="Select Input ERP file",
-            filetypes=[("ERPLAB files", "*.erp"), ("All files", "*.*")]
+            title="Select Input file",
+            # Add EEGLAB .set to the filetypes
+            filetypes=[("EEG Data", "*.erp *.set"), ("ERPLAB files", "*.erp"), ("EEGLAB files", "*.set"), ("All files", "*.*")]
         )
         if filename:
             self.input_erp_entry.delete(0, tk.END)
             self.input_erp_entry.insert(0, filename)
+            # Auto-generate .fif output filename based on input name
             default_output_fif = os.path.splitext(filename)[0] + ".fif"
             self.output_fif_entry.delete(0, tk.END)
             self.output_fif_entry.insert(0, default_output_fif)
@@ -295,9 +345,9 @@ class ErpProcessorApp:
             self.channels_entry.insert(0, ", ".join(selected_channels))
             dialog.destroy()
         
-        ok_button = tk.Button(button_frame, text="OK", command=on_ok, bg=DARK_BUTTON_BG, fg=DARK_BUTTON_FG, activebackground=DARK_ACTIVE_BUTTON_BG, relief=tk.FLAT, padx=10)
+        ok_button = TkButton(button_frame, text="OK", command=on_ok, bg=DARK_BUTTON_BG, fg=DARK_BUTTON_FG, activebackground=DARK_ACTIVE_BUTTON_BG, relief=tk.FLAT, padx=10)
         ok_button.pack(side=tk.RIGHT, padx=5)
-        cancel_button = tk.Button(button_frame, text="Cancel", command=dialog.destroy, bg=DARK_BUTTON_BG, fg=DARK_BUTTON_FG, activebackground=DARK_ACTIVE_BUTTON_BG, relief=tk.FLAT, padx=10)
+        cancel_button = TkButton(button_frame, text="Cancel", command=dialog.destroy, bg=DARK_BUTTON_BG, fg=DARK_BUTTON_FG, activebackground=DARK_ACTIVE_BUTTON_BG, relief=tk.FLAT, padx=10)
         cancel_button.pack(side=tk.RIGHT)
         dialog.update_idletasks()
         x = self.root.winfo_x() + (self.root.winfo_width() // 2) - (dialog.winfo_width() // 2)
@@ -345,9 +395,9 @@ class ErpProcessorApp:
             self.bins_entry.insert(0, ", ".join(selected_bins))
             dialog.destroy()
         
-        ok_button = tk.Button(button_frame, text="OK", command=on_ok, bg=DARK_BUTTON_BG, fg=DARK_BUTTON_FG, activebackground=DARK_ACTIVE_BUTTON_BG, relief=tk.FLAT, padx=10)
+        ok_button = TkButton(button_frame, text="OK", command=on_ok, bg=DARK_BUTTON_BG, fg=DARK_BUTTON_FG, activebackground=DARK_ACTIVE_BUTTON_BG, relief=tk.FLAT, padx=10)
         ok_button.pack(side=tk.RIGHT, padx=5)
-        cancel_button = tk.Button(button_frame, text="Cancel", command=dialog.destroy, bg=DARK_BUTTON_BG, fg=DARK_BUTTON_FG, activebackground=DARK_ACTIVE_BUTTON_BG, relief=tk.FLAT, padx=10)
+        cancel_button = TkButton(button_frame, text="Cancel", command=dialog.destroy, bg=DARK_BUTTON_BG, fg=DARK_BUTTON_FG, activebackground=DARK_ACTIVE_BUTTON_BG, relief=tk.FLAT, padx=10)
         cancel_button.pack(side=tk.RIGHT)
         dialog.update_idletasks()
         x = self.root.winfo_x() + (self.root.winfo_width() // 2) - (dialog.winfo_width() // 2)
@@ -427,10 +477,10 @@ class ErpProcessorApp:
         button_frame.pack(fill=tk.X, padx=10, pady=10)
         
         common_opts = {'bg': DARK_BUTTON_BG, 'fg': DARK_BUTTON_FG, 'activebackground': DARK_ACTIVE_BUTTON_BG, 'relief': tk.FLAT, 'padx': 10}
-        tk.Button(button_frame, text="Reset to Defaults", command=on_reset, **common_opts).pack(side=tk.LEFT)
-        tk.Button(button_frame, text="OK", command=on_ok, **common_opts).pack(side=tk.RIGHT)
-        tk.Button(button_frame, text="Apply", command=apply_changes, **common_opts).pack(side=tk.RIGHT, padx=5)
-        tk.Button(button_frame, text="Cancel", command=dialog.destroy, **common_opts).pack(side=tk.RIGHT)
+        TkButton(button_frame, text="Reset to Defaults", command=on_reset, **common_opts).pack(side=tk.LEFT)
+        TkButton(button_frame, text="OK", command=on_ok, **common_opts).pack(side=tk.RIGHT)
+        TkButton(button_frame, text="Apply", command=apply_changes, **common_opts).pack(side=tk.RIGHT, padx=5)
+        TkButton(button_frame, text="Cancel", command=dialog.destroy, **common_opts).pack(side=tk.RIGHT)
         
         dialog.update_idletasks()
         x = self.root.winfo_x() + (self.root.winfo_width() // 2) - (dialog.winfo_width() // 2)
@@ -455,24 +505,34 @@ class ErpProcessorApp:
             self._initialize_plot()
 
     def _run_conversion(self):
-        input_file = self.input_erp_entry.get()
-        output_file = self.output_fif_entry.get()
+            input_file = self.input_erp_entry.get()
+            output_file = self.output_fif_entry.get()
 
-        if not input_file or not os.path.exists(input_file):
-            messagebox.showerror("Error", "Input .erp file is invalid or not specified.")
-            return
-        if not output_file:
-            messagebox.showerror("Error", "Output .fif file path not specified.")
-            return
+            if not input_file or not os.path.exists(input_file):
+                messagebox.showerror("Error", "Input file is invalid or not specified.")
+                return
+            if not output_file:
+                messagebox.showerror("Error", "Output .fif file path not specified.")
+                return
 
-        success, message = erp_to_fif(input_file, output_file)
-        if success:
-            messagebox.showinfo("Conversion Success", message)
-            self.current_fif_file.set(output_file)
-            self._load_fif_data(output_file)
-        else:
-            messagebox.showerror("Conversion Failed", message)
-            
+            # Check extension to determine conversion method
+            _, ext = os.path.splitext(input_file)
+            ext = ext.lower()
+
+            if ext == '.erp':
+                success, message = erp_to_fif(input_file, output_file)
+            elif ext == '.set':
+                success, message = set_to_fif(input_file, output_file)
+            else:
+                messagebox.showerror("Error", f"Unsupported file extension: {ext}")
+                return
+
+            if success:
+                messagebox.showinfo("Conversion Success", message)
+                self.current_fif_file.set(output_file)
+                self._load_fif_data(output_file)
+            else:
+                messagebox.showerror("Conversion Failed", message)     
     def _update_plot_display(self):
         if self.evokeds_data is None:
             if self.current_fif_file.get():

@@ -35,7 +35,6 @@ You can reach out to me for the specific setup files if you have any trouble.
     * Customize the time window (start and end in milliseconds).
     * Set custom Y-axis limits (in microvolts).
     * Add a custom plot title.
-    * Toggle gridlines on the plot.
     * Add vertical lines at specified time points (e.g., for stimulus onset, component peaks).
 * **Plot Export**: Save the generated plot in various formats (PNG, JPEG, SVG, PDF) with adjustable DPI.
 * **User-Friendly Interface**:
